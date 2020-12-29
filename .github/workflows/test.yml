@@ -3,11 +3,13 @@ name: Test
 on: [push]
 
 jobs:
-  build:
+  test:
+
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ 3.6, 3.7, 3.8 ]
+        python-version: [3.7, 3.8]
+
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -18,43 +20,56 @@ jobs:
     - name: Cache pip
       uses: actions/cache@v2
       with:
-        # This path is specific to Ubuntu
         path: ~/.cache/pip
-        # Look to see if there is a cache hit for the corresponding requirements file
-        key: ${{ runner.os }}-python${{ matrix.python-version}}-pip-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev_requirements.txt') }}-${ GITHUB_REF }
-
-    - name: Patch for Python 3.6
-      if: matrix.python-version == 3.6
-      run: |
-        pip install strip-hints==0.1.9
-        ./patch-python3.6.sh
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}-${{ hashFiles('poetry.lock') }}-${ GITHUB_REF }
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          ${{ runner.os }}-
 
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt
+        curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python
+        source $HOME/.poetry/env
+        poetry install
 
-    - name: Install dev dependencies
+    - name: Run tests
       run: |
-        pip install -r dev_requirements.txt
+        source $HOME/.poetry/env
+        poetry run pytest
 
-    - name: Test
+    - name: Build wheels
       run: |
-        pytest
+        source $HOME/.poetry/env
+        poetry build
 
-    - name: Build package
-      env:
-        PYTHON_VERSION: ${{ matrix.python-version }}
+  build-docs:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip
+      uses: actions/cache@v2
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('docs/source/requirements.txt') }}-${ GITHUB_REF }
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          ${{ runner.os }}-
+
+    - name: Install dependencies
       run: |
-        python setup.py bdist_wheel --python-tag py${PYTHON_VERSION//.}
+        python -m pip install --upgrade pip
+        pip install -r docs/source/requirements.txt
 
-    - name: Test install package
+    - name: Build html
       run: |
-        pip install virtualenv
-        virtualenv installable
-        source installable/bin/activate
-
-        pip install dist/$(ls dist)
-
-        mkdir test_install
-        cd test_install
-        python -c "import datastream"
+        (cd docs && make html)

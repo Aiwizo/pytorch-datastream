@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ 3.6, 3.7, 3.8 ]
+        python-version: [ 3.7, 3.8 ]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -17,53 +17,83 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Patch for Python 3.6
-      if: matrix.python-version == 3.6
+    - name: Install dependencies
       run: |
-        pip install strip-hints==0.1.9
-        ./patch-python3.6.sh
+        curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python
+        source $HOME/.poetry/env
+        poetry install
 
-        git config --global user.email "actions@github.com"
-        git config --global user.name "Github Actions"
+    - name: Run tests
+      run: |
+        source $HOME/.poetry/env
+        poetry run pytest
 
-        git add --all
-        git commit --message "Python 3.6 patch"
-        latest_tag=$(git describe --abbrev=0 --tags)
-        git tag --force ${latest_tag}
+    - name: Build wheels
+      run: |
+        source $HOME/.poetry/env
+        poetry version $(git tag --points-at HEAD)
+        poetry build
+
+    - name: Upload
+      env:
+        USERNAME: __token__
+        PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        source $HOME/.poetry/env
+        poetry publish --username=$USERNAME --password=$PASSWORD
+
+
+
+name: Publish
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ 3.7, 3.8 ]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
 
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt
+        curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python
+        source $HOME/.poetry/env
+        poetry install
 
-    - name: Install dev dependencies
+    - name: Run tests
       run: |
-        pip install -r dev_requirements.txt
+        source $HOME/.poetry/env
+        poetry run pytest
 
-    - name: Test
+    - name: Build wheels
       run: |
-        pytest
+        source $HOME/.poetry/env
+        poetry version $(git tag --points-at HEAD)
+        poetry build
 
     - name: Test install package
-      env:
-        PYTHON_VERSION: ${{ matrix.python-version }}
       run: |
-        python setup.py bdist_wheel --python-tag py${PYTHON_VERSION//.}
-
-    - name: Test install package
-      run: |
-        pip install virtualenv
-        virtualenv installable
-        source installable/bin/activate
-
-        pip install dist/$(ls dist)
-
+        source $HOME/.poetry/env
         mkdir test_install
         cd test_install
-        python -c "import datastream"
+        poetry init
+        poetry add ../dist/$(ls dist/*.whl)
+        
+        poetry run python -c "import datastream"
 
-    - name: PyPi Publish
+    - name: Upload
       env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-      run:
-        twine upload dist/*
+        USERNAME: __token__
+        PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        source $HOME/.poetry/env
+        poetry publish --username=$USERNAME --password=$PASSWORD
